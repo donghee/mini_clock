@@ -8,6 +8,9 @@
 #include <cmath>
 #include <ctime>
 #include <cstdio>
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include "clock_lib.h"
 
 // 화면 크기 설정 (200x200으로 축소)
 const int SCREEN_WIDTH = 200;
@@ -17,114 +20,85 @@ const int SCREEN_HEIGHT = 200;
 const int CLOCK_RADIUS = 80;
 const Vector2 CLOCK_CENTER = {SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
 
-// 시계 구조체
-struct AnalogClock {
-    Vector2 center;
-    float radius;
-    float hourHandLength;
-    float minuteHandLength;
-    float secondHandLength;
-    float hourAngle;
-    float minuteAngle;
-    float secondAngle;
-    int hours;
-    int minutes;
-    int seconds;
+// Hot reload를 위한 라이브러리 관리 구조체
+struct ClockLibrary {
+    void* handle;
+    InitClockFunc InitClock;
+    UpdateTimeFunc UpdateTime;
+    DrawAnalogClockFunc DrawAnalogClock;
+    GetLibVersionFunc GetLibVersion;
+    time_t lastModTime;
+    int version;
 };
 
-// 현재 시간을 가져오는 함수
-void UpdateTime(AnalogClock* clock) {
-    time_t rawTime;
-    struct tm* timeInfo;
-
-    time(&rawTime);
-    timeInfo = localtime(&rawTime);
-
-    clock->hours = timeInfo->tm_hour % 12;
-    clock->minutes = timeInfo->tm_min;
-    clock->seconds = timeInfo->tm_sec;
-
-    // 각도 계산 (12시 방향을 0도로 하고 시계방향으로 증가)
-    clock->secondAngle = (clock->seconds * 6.0f) - 90.0f;  // 6도씩 증가
-    clock->minuteAngle = (clock->minutes * 6.0f + clock->seconds * 0.1f) - 90.0f;  // 6도씩 + 초단위 보간
-    clock->hourAngle = (clock->hours * 30.0f + clock->minutes * 0.5f) - 90.0f;  // 30도씩 + 분단위 보간
+// 라이브러리 파일의 수정 시간 가져오기
+time_t GetFileModTime_(const char* path) {
+    struct stat fileStat;
+    if (stat(path, &fileStat) == 0) {
+        return fileStat.st_mtime;
+    }
+    return 0;
 }
 
-// 시계 바늘을 그리는 함수
-void DrawClockHand(Vector2 center, float angle, float length, float thickness, Color color) {
-    float endX = center.x + cosf(angle * DEG2RAD) * length;
-    float endY = center.y + sinf(angle * DEG2RAD) * length;
-
-    // 본체 그리기
-    DrawLineEx(center, {endX, endY}, thickness, color);
-    DrawCircle(center.x, center.y, thickness / 2, color);
-}
-
-// 시계 숫자와 눈금을 그리는 함수 (작은 화면에 맞게 조정)
-void DrawClockFace(Vector2 center, float radius) {
-    // 외곽 원
-    DrawCircleLines(center.x, center.y, radius, BLACK);
-    DrawCircleLines(center.x, center.y, radius - 1, BLACK);
-
-    // 시간 숫자와 주요 눈금
-    for (int i = 1; i <= 12; i++) {
-        float angle = (i * 30.0f) - 90.0f;  // 12시 방향을 0도로
-        float numberRadius = radius - 16;  // 작은 화면에 맞게 조정
-        float tickRadius = radius - 3;     // 작은 화면에 맞게 조정
-
-        // 주요 눈금 (시간)
-        float tickStartX = center.x + cosf(angle * DEG2RAD) * tickRadius;
-        float tickStartY = center.y + sinf(angle * DEG2RAD) * tickRadius;
-        float tickEndX = center.x + cosf(angle * DEG2RAD) * (tickRadius - 8);
-        float tickEndY = center.y + sinf(angle * DEG2RAD) * (tickRadius - 8);
-
-        DrawLineEx({tickStartX, tickStartY}, {tickEndX, tickEndY}, 2, BLACK);
-
-        // 숫자 그리기 (더 작은 폰트 사용)
-        char numberStr[3];
-        sprintf(numberStr, "%d", i);
-        float numberX = center.x + cosf(angle * DEG2RAD) * numberRadius;
-        float numberY = center.y + sinf(angle * DEG2RAD) * numberRadius;
-        int textWidth = MeasureText(numberStr, 10);
-        DrawText(numberStr, numberX - textWidth / 2, numberY - 4, 8, BLACK);
+// 라이브러리 로드 또는 리로드
+bool LoadClockLibrary(ClockLibrary* lib, const char* libPath) {
+    // 기존 라이브러리가 있으면 언로드
+    if (lib->handle != nullptr) {
+        dlclose(lib->handle);
+        lib->handle = nullptr;
+        printf("Unloaded previous library\n");
     }
 
-    // 분 눈금 (작은 눈금) - 간격을 넓혀서 보기 좋게
-    for (int i = 0; i < 60; i++) {
-        if (i % 5 != 0) {  // 5분 단위가 아닌 경우만
-            float angle = (i * 6.0f) - 90.0f;
-            float tickRadius = radius - 3;
-
-            float tickStartX = center.x + cosf(angle * DEG2RAD) * tickRadius;
-            float tickStartY = center.y + sinf(angle * DEG2RAD) * tickRadius;
-            float tickEndX = center.x + cosf(angle * DEG2RAD) * (tickRadius - 4);
-            float tickEndY = center.y + sinf(angle * DEG2RAD) * (tickRadius - 4);
-
-            DrawLineEx({tickStartX, tickStartY}, {tickEndX, tickEndY}, 0.5f, GRAY);
-        }
+    // 라이브러리 로드 (RTLD_GLOBAL로 메인의 symbols를 공유)
+    printf("Loading library from: %s\n", libPath);
+    lib->handle = dlopen(libPath, RTLD_NOW | RTLD_GLOBAL);
+    if (!lib->handle) {
+        fprintf(stderr, "Failed to load library: %s\n", dlerror());
+        return false;
     }
+    printf("Library loaded successfully\n");
+
+    // 함수 포인터 로드
+    printf("Loading function pointers...\n");
+    lib->InitClock = (InitClockFunc)dlsym(lib->handle, "InitClock");
+    lib->UpdateTime = (UpdateTimeFunc)dlsym(lib->handle, "UpdateTime");
+    lib->DrawAnalogClock = (DrawAnalogClockFunc)dlsym(lib->handle, "DrawAnalogClock");
+    lib->GetLibVersion = (GetLibVersionFunc)dlsym(lib->handle, "GetLibVersion");
+
+    if (!lib->InitClock || !lib->UpdateTime || !lib->DrawAnalogClock || !lib->GetLibVersion) {
+        fprintf(stderr, "Failed to load library functions: %s\n", dlerror());
+        fprintf(stderr, "  InitClock: %p\n", (void*)lib->InitClock);
+        fprintf(stderr, "  UpdateTime: %p\n", (void*)lib->UpdateTime);
+        fprintf(stderr, "  DrawAnalogClock: %p\n", (void*)lib->DrawAnalogClock);
+        fprintf(stderr, "  GetLibVersion: %p\n", (void*)lib->GetLibVersion);
+        dlclose(lib->handle);
+        lib->handle = nullptr;
+        return false;
+    }
+    printf("All function pointers loaded\n");
+
+    // 라이브러리 버전과 수정 시간 업데이트
+    lib->version = lib->GetLibVersion();
+    lib->lastModTime = GetFileModTime_(libPath);
+
+    printf("Loaded library version %d\n", lib->version);
+    return true;
 }
 
-// 시계 전체를 그리는 함수
-void DrawAnalogClock(const AnalogClock* clock) {
-    // 시계판 배경 (투명한 흰색)
-    DrawCircle(clock->center.x, clock->center.y, clock->radius, Fade(WHITE, 0.8f));
+// Hot reload 체크
+bool CheckAndReloadLibrary(ClockLibrary* lib, const char* libPath) {
+    time_t currentModTime = GetFileModTime_(libPath);
 
-    // 시계 숫자와 눈금
-    DrawClockFace(clock->center, clock->radius);
+    // 파일이 수정되었는지 확인
+    if (currentModTime > lib->lastModTime) {
+        printf("Library file changed, reloading...\n");
 
-    // 시계 바늘 그리기 (뒤에서부터)
-    // 시침
-    DrawClockHand(clock->center, clock->hourAngle, clock->hourHandLength, 2.0f, BLACK);
+        // 짧은 대기 시간 (빌드가 완료될 때까지)
+        // 실제로는 inotify 등을 사용하는 것이 더 좋지만, 간단하게 구현
+        return LoadClockLibrary(lib, libPath);
+    }
 
-    // 분침
-    DrawClockHand(clock->center, clock->minuteAngle, clock->minuteHandLength, 1.5f, BLACK);
-
-    // 초침
-    DrawClockHand(clock->center, clock->secondAngle, clock->secondHandLength, 1.0f, RED);
-
-    // 중앙 점
-    DrawCircle(clock->center.x, clock->center.y, 3, BLACK);
+    return false;
 }
 
 int main() {
@@ -136,27 +110,47 @@ int main() {
 
     SetTargetFPS(60);
 
+    // 라이브러리 로드
+    ClockLibrary clockLib = {0};
+    const char* libPath = "./libclock.so";
+
+    if (!LoadClockLibrary(&clockLib, libPath)) {
+        fprintf(stderr, "Failed to load clock library. Exiting.\n");
+        CloseWindow();
+        return 1;
+    }
+
     // 아날로그 시계 초기화
     AnalogClock clock = {0};
-    clock.center = CLOCK_CENTER;
-    clock.radius = CLOCK_RADIUS;
-    clock.hourHandLength = CLOCK_RADIUS * 0.45f;   // 작게 조정
-    clock.minuteHandLength = CLOCK_RADIUS * 0.65f; // 작게 조정
-    clock.secondHandLength = CLOCK_RADIUS * 0.8f;  // 작게 조정
+    clockLib.InitClock(&clock, CLOCK_CENTER, CLOCK_RADIUS);
+
+    // Hot reload 체크 타이머 (1초마다)
+    double lastCheckTime = GetTime();
+    const double CHECK_INTERVAL = 1.0;
 
     // 메인 루프
     while (!WindowShouldClose()) {
+        // Hot reload 체크
+        double currentTime = GetTime();
+        if (currentTime - lastCheckTime >= CHECK_INTERVAL) {
+            if (CheckAndReloadLibrary(&clockLib, libPath)) {
+                // 라이브러리가 리로드되면 시계 재초기화
+                clockLib.InitClock(&clock, CLOCK_CENTER, CLOCK_RADIUS);
+            }
+            lastCheckTime = currentTime;
+        }
+
         // 현재 시간 업데이트
-        UpdateTime(&clock);
+        clockLib.UpdateTime(&clock);
 
         // 렌더링 시작
         BeginDrawing();
         ClearBackground(BLANK);  // 완전 투명 배경
 
         // 시계 그리기
-        DrawAnalogClock(&clock);
+        clockLib.DrawAnalogClock(&clock);
 
-        // 디지털 시간 표시 (하단, 더 작은 폰트로 조정)
+        // 디지털 시간 표시 (하단)
         char timeStr[32];
         sprintf(timeStr, "%02d:%02d:%02d",
                 (clock.hours == 0) ? 12 : clock.hours,
@@ -165,14 +159,20 @@ int main() {
         int textWidth = MeasureText(timeStr, 14);
         DrawText(timeStr, (SCREEN_WIDTH - textWidth) / 2, SCREEN_HEIGHT - 12, 10, DARKGRAY);
 
-        // 제목 제거 또는 매우 작게 표시 (공간 절약을 위해)
-        // 200x200 픽셀에서는 공간이 매우 제한적이므로 제목을 생략
+        // Hot reload 상태 표시
+        char versionStr[32];
+        sprintf(versionStr, "v%d", clockLib.version);
+        DrawText(versionStr, 5, 5, 8, Fade(GREEN, 0.5f));
 
         EndDrawing();
+    }
+
+    // 라이브러리 언로드
+    if (clockLib.handle) {
+        dlclose(clockLib.handle);
     }
 
     CloseWindow();
 
     return 0;
 }
-
