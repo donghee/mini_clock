@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 project(mini_clock)
 
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Set build type
 #set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_BUILD_TYPE Debug)
@@ -23,9 +27,9 @@ endif()
 
 # Clock library (shared library for hot reload)
 # Note: Does NOT link raylib - uses symbols from main executable
-add_library(clock SHARED clock_lib.cpp)
+add_library(clock SHARED clock_lib.cpp clock_lib.h hot_reload.h)
 target_compile_options(clock PRIVATE -Wall -Wextra)
-target_compile_features(clock PRIVATE cxx_std_20)
+target_compile_features(clock PRIVATE cxx_std_17)
 target_include_directories(clock PRIVATE ${raylib_SOURCE_DIR}/src)
 set_target_properties(clock PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -34,9 +38,9 @@ set_target_properties(clock PROPERTIES
 )
 
 # Main executable
-add_executable(main main.cpp)
+add_executable(main main.cpp hot_reload.h clock_lib.h)
 target_compile_options(main PRIVATE -Wall -Wextra)
-target_compile_features(main PRIVATE cxx_std_20)
+target_compile_features(main PRIVATE cxx_std_17)
 target_link_libraries(main raylib ${CMAKE_DL_LIBS})
 # Export symbols for the shared library to use
 set_target_properties(main PROPERTIES

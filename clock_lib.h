@@ -3,17 +3,33 @@
 //
 // Copyright (c) 2024 Donghee Park, all rights reserved
 
-#ifndef CLOCK_LIB_H
-#define CLOCK_LIB_H
+#pragma once
 
 #include <raylib.h>
+#include <memory>
+#include "hot_reload.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+// Clock interface for hot reload
+class IClock : public HotReload::IReloadable {
+public:
+    virtual ~IClock() = default;
 
-// 시계 구조체
-typedef struct {
+    // Clock operations
+    virtual void Initialize(Vector2 center, float radius) = 0;
+    virtual void Update() = 0;
+    virtual void Draw() const = 0;
+    virtual void DrawFace(Vector2 center, float radius) const = 0;
+    virtual void DrawHand(Vector2 center, float angle, float length, float thickness, Color color) const = 0;
+
+    // Get current time values
+    virtual int GetHours() const = 0;
+    virtual int GetMinutes() const = 0;
+    virtual int GetSeconds() const = 0;
+};
+
+// Clock implementation
+class AnalogClock : public IClock {
+private:
     Vector2 center;
     float radius;
     float hourHandLength;
@@ -25,28 +41,36 @@ typedef struct {
     int hours;
     int minutes;
     int seconds;
-} AnalogClock;
 
-// 라이브러리 API
-typedef void (*InitClockFunc)(AnalogClock* clock, Vector2 center, float radius);
-typedef void (*UpdateTimeFunc)(AnalogClock* clock);
-typedef void (*DrawAnalogClockFunc)(const AnalogClock* clock);
-typedef void (*DrawClockFaceFunc)(Vector2 center, float radius);
-typedef void (*DrawClockHandFunc)(Vector2 center, float angle, float length, float thickness, Color color);
+public:
+    AnalogClock();
+    AnalogClock(const AnalogClock& other);  // Copy constructor
+    virtual ~AnalogClock() = default;
 
-// 라이브러리 버전 (Hot reload 감지용)
-typedef int (*GetLibVersionFunc)();
+    // IClock interface implementation
+    void Initialize(Vector2 center, float radius) override;
+    void Update() override;
+    void Draw() const override;
+    void DrawFace(Vector2 center, float radius) const override;
+    void DrawHand(Vector2 center, float angle, float length, float thickness, Color color) const override;
+    int GetVersion() const override;
 
-// 실제 함수 선언
-void InitClock(AnalogClock* clock, Vector2 center, float radius);
-void UpdateTime(AnalogClock* clock);
-void DrawAnalogClock(const AnalogClock* clock);
-void DrawClockFace(Vector2 center, float radius);
-void DrawClockHand(Vector2 center, float angle, float length, float thickness, Color color);
-int GetLibVersion();
+    // Getters
+    int GetHours() const override { return hours; }
+    int GetMinutes() const override { return minutes; }
+    int GetSeconds() const override { return seconds; }
 
-#ifdef __cplusplus
+    // State getters for copying
+    Vector2 GetCenter() const { return center; }
+    float GetRadius() const { return radius; }
+    float GetHourAngle() const { return hourAngle; }
+    float GetMinuteAngle() const { return minuteAngle; }
+    float GetSecondAngle() const { return secondAngle; }
+};
+
+// Factory functions for hot reload
+extern "C" {
+    void* CreateInstance();
+    void DestroyInstance(void* instance);
+    void* CreateInstanceWithState(void* existingInstance);
 }
-#endif
-
-#endif // CLOCK_LIB_H

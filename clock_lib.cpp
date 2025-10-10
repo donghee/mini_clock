@@ -11,50 +11,46 @@
 #include <cstdio>
 
 // 라이브러리 버전 (변경 시 증가)
-#define LIB_VERSION 1
+#define LIB_VERSION 2
 
-extern "C" {
-
-// 라이브러리 버전 반환
-int GetLibVersion() {
-    return LIB_VERSION;
+// AnalogClock 클래스 구현
+AnalogClock::AnalogClock() : center{0, 0}, radius(0), hourHandLength(0), minuteHandLength(0),
+                            secondHandLength(0), hourAngle(0), minuteAngle(0), secondAngle(0),
+                            hours(0), minutes(0), seconds(0) {
 }
 
-// 시계 초기화
-void InitClock(AnalogClock* clock, Vector2 center, float radius) {
-    clock->center = center;
-    clock->radius = radius;
-    clock->hourHandLength = radius * 0.45f;
-    clock->minuteHandLength = radius * 0.65f;
-    clock->secondHandLength = radius * 0.8f;
-    clock->hourAngle = 0.0f;
-    clock->minuteAngle = 0.0f;
-    clock->secondAngle = 0.0f;
-    clock->hours = 0;
-    clock->minutes = 0;
-    clock->seconds = 0;
+void AnalogClock::Initialize(Vector2 center, float radius) {
+    this->center = center;
+    this->radius = radius;
+    this->hourHandLength = radius * 0.45f;
+    this->minuteHandLength = radius * 0.65f;
+    this->secondHandLength = radius * 0.8f;
+    this->hourAngle = 0.0f;
+    this->minuteAngle = 0.0f;
+    this->secondAngle = 0.0f;
+    this->hours = 0;
+    this->minutes = 0;
+    this->seconds = 0;
 }
 
-// 현재 시간을 가져오는 함수
-void UpdateTime(AnalogClock* clock) {
+void AnalogClock::Update() {
     time_t rawTime;
     struct tm* timeInfo;
 
     time(&rawTime);
     timeInfo = localtime(&rawTime);
 
-    clock->hours = timeInfo->tm_hour % 12;
-    clock->minutes = timeInfo->tm_min;
-    clock->seconds = timeInfo->tm_sec;
+    hours = timeInfo->tm_hour % 12;
+    minutes = timeInfo->tm_min;
+    seconds = timeInfo->tm_sec;
 
     // 각도 계산 (12시 방향을 0도로 하고 시계방향으로 증가)
-    clock->secondAngle = (clock->seconds * 6.0f) - 90.0f;  // 6도씩 증가
-    clock->minuteAngle = (clock->minutes * 6.0f + clock->seconds * 0.1f) - 90.0f;  // 6도씩 + 초단위 보간
-    clock->hourAngle = (clock->hours * 30.0f + clock->minutes * 0.5f) - 90.0f;  // 30도씩 + 분단위 보간
+    secondAngle = (seconds * 6.0f) - 90.0f;  // 6도씩 증가
+    minuteAngle = (minutes * 6.0f + seconds * 0.1f) - 90.0f;  // 6도씩 + 초단위 보간
+    hourAngle = (hours * 30.0f + minutes * 0.5f) - 90.0f;  // 30도씩 + 분단위 보간
 }
 
-// 시계 바늘을 그리는 함수
-void DrawClockHand(Vector2 center, float angle, float length, float thickness, Color color) {
+void AnalogClock::DrawHand(Vector2 center, float angle, float length, float thickness, Color color) const {
     float endX = center.x + cosf(angle * DEG2RAD) * length;
     float endY = center.y + sinf(angle * DEG2RAD) * length;
 
@@ -63,8 +59,7 @@ void DrawClockHand(Vector2 center, float angle, float length, float thickness, C
     DrawCircle(center.x, center.y, thickness / 2, color);
 }
 
-// 시계 숫자와 눈금을 그리는 함수
-void DrawClockFace(Vector2 center, float radius) {
+void AnalogClock::DrawFace(Vector2 center, float radius) const {
     // 외곽 원
     DrawCircleLines(center.x, center.y, radius, BLACK);
     DrawCircleLines(center.x, center.y, radius - 1, BLACK);
@@ -108,26 +103,50 @@ void DrawClockFace(Vector2 center, float radius) {
     }
 }
 
-// 시계 전체를 그리는 함수
-void DrawAnalogClock(const AnalogClock* clock) {
+void AnalogClock::Draw() const {
     // 시계판 배경 (투명한 흰색)
-    DrawCircle(clock->center.x, clock->center.y, clock->radius, Fade(WHITE, 0.8f));
+    DrawCircle(center.x, center.y, radius, Fade(WHITE, 0.8f));
 
     // 시계 숫자와 눈금
-    DrawClockFace(clock->center, clock->radius);
+    DrawFace(center, radius);
 
     // 시계 바늘 그리기 (뒤에서부터)
     // 시침
-    DrawClockHand(clock->center, clock->hourAngle, clock->hourHandLength, 3.0f, BLACK);
+    DrawHand(center, hourAngle, hourHandLength, 3.0f, BLACK);
 
     // 분침
-    DrawClockHand(clock->center, clock->minuteAngle, clock->minuteHandLength, 2.0f, BLACK);
+    DrawHand(center, minuteAngle, minuteHandLength, 2.0f, BLACK);
 
     // 초침
-    DrawClockHand(clock->center, clock->secondAngle, clock->secondHandLength, 1.0f, RED);
+    DrawHand(center, secondAngle, secondHandLength, 1.0f, RED);
 
     // 중앙 점
-    DrawCircle(clock->center.x, clock->center.y, 3, BLACK);
+    DrawCircle(center.x, center.y, 3, BLACK);
 }
 
-} // extern "C"
+int AnalogClock::GetVersion() const {
+    return LIB_VERSION;
+}
+
+// Factory functions for hot reload
+extern "C" {
+    void* CreateInstance() {
+        return new AnalogClock();
+    }
+
+    void DestroyInstance(void* instance) {
+        delete static_cast<AnalogClock*>(instance);
+    }
+
+    void* CreateInstanceWithState(void* existingInstance) {
+        if (existingInstance) {
+            AnalogClock* oldClock = static_cast<AnalogClock*>(existingInstance);
+            printf("Copying state from existing instance (version %d)\n", oldClock->GetVersion());
+            // return new AnalogClock(*oldClock);  // Use copy constructor is not working in hot reload. So manually copy state.
+            AnalogClock* newClock = new AnalogClock();
+            newClock->Initialize(oldClock->GetCenter(), oldClock->GetRadius());
+            return newClock;
+        }
+        return new AnalogClock();  // Fallback to default constructor
+    }
+}
