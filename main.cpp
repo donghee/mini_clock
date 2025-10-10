@@ -51,16 +51,9 @@ void UpdateTime(AnalogClock* clock) {
 }
 
 // 시계 바늘을 그리는 함수
-void DrawClockHand(Vector2 center, float angle, float length, float thickness, Color color, bool drawOutline = false) {
+void DrawClockHand(Vector2 center, float angle, float length, float thickness, Color color) {
     float endX = center.x + cosf(angle * DEG2RAD) * length;
     float endY = center.y + sinf(angle * DEG2RAD) * length;
-
-    // 외곽선이 필요한 경우 (분침, 시침)
-    if (drawOutline) {
-        // 검정색 외곽선 먼저 그리기 (더 두껍게)
-        DrawLineEx(center, {endX, endY}, thickness + 2.0f, BLACK);
-        DrawCircle(center.x, center.y, (thickness + 2.0f) / 2, BLACK);
-    }
 
     // 본체 그리기
     DrawLineEx(center, {endX, endY}, thickness, color);
@@ -114,21 +107,21 @@ void DrawClockFace(Vector2 center, float radius) {
 
 // 시계 전체를 그리는 함수
 void DrawAnalogClock(const AnalogClock* clock) {
-    // 시계판 배경 (흰색)
-    DrawCircle(clock->center.x, clock->center.y, clock->radius, WHITE);
+    // 시계판 배경 (투명한 흰색)
+    DrawCircle(clock->center.x, clock->center.y, clock->radius, Fade(WHITE, 0.8f));
 
     // 시계 숫자와 눈금
     DrawClockFace(clock->center, clock->radius);
 
     // 시계 바늘 그리기 (뒤에서부터)
     // 시침
-    DrawClockHand(clock->center, clock->hourAngle, clock->hourHandLength, 2.0f, WHITE, true);
+    DrawClockHand(clock->center, clock->hourAngle, clock->hourHandLength, 2.0f, BLACK);
 
     // 분침
-    DrawClockHand(clock->center, clock->minuteAngle, clock->minuteHandLength, 2.0f, WHITE, true);
+    DrawClockHand(clock->center, clock->minuteAngle, clock->minuteHandLength, 1.5f, BLACK);
 
     // 초침
-    DrawClockHand(clock->center, clock->secondAngle, clock->secondHandLength, 1.5f, RED, false);
+    DrawClockHand(clock->center, clock->secondAngle, clock->secondHandLength, 1.0f, RED);
 
     // 중앙 점
     DrawCircle(clock->center.x, clock->center.y, 3, BLACK);
